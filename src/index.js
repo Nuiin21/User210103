@@ -4,10 +4,11 @@ import makeWASocket, {
     downloadMediaMessage,
     fetchLatestBaileysVersion
 } from '@whiskeysockets/baileys'
-import qrcode from 'qrcode-terminal'
+import qrcode from 'qrcode'
 import pino from 'pino'
 import fs from 'fs'
 import path from 'path'
+import http from 'http'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -16,6 +17,42 @@ const AUTH_DIR = path.join(__dirname, '../auth_info')
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true })
 
 const logger = pino({ level: 'silent' })
+const PORT = process.env.PORT || 3000
+
+let currentQR = null
+let isConnected = false
+
+// HTTP server untuk serve QR
+const server = http.createServer(async (req, res) => {
+    if (isConnected) {
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end(`<html><body style="background:#111;color:#25D366;font-family:sans-serif;text-align:center;padding:50px">
+            <h2>✅ Bot sudah terhubung ke WhatsApp!</h2>
+        </body></html>`)
+        return
+    }
+    if (!currentQR) {
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end(`<html><body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding:50px">
+            <h2>⏳ Menunggu QR...</h2>
+            <script>setTimeout(()=>location.reload(), 3000)</script>
+        </body></html>`)
+        return
+    }
+    const qrImage = await qrcode.toDataURL(currentQR)
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(`<html><body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding:50px">
+        <h2>📱 Scan QR ini di WhatsApp</h2>
+        <p>Perangkat Tertaut → Tautkan Perangkat Baru</p>
+        <img src="${qrImage}" style="width:300px;height:300px;border:4px solid #25D366;border-radius:12px"/>
+        <p style="color:#aaa;font-size:13px">Halaman otomatis refresh tiap 5 detik</p>
+        <script>setTimeout(()=>location.reload(), 5000)</script>
+    </body></html>`)
+})
+
+server.listen(PORT, () => {
+    console.log(`🌐 QR tersedia di: http://localhost:${PORT}`)
+})
 
 const MENU_TEXT = `🤖 *WA HD Bot*
 
@@ -53,19 +90,18 @@ async function connectToWA() {
     // Connection handler
     sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
         if (qr) {
-            console.clear()
-            console.log('━'.repeat(50))
-            console.log('  📱 Scan QR ini di WA:')
-            console.log('  Perangkat Tertaut → Tautkan Perangkat Baru')
-            console.log('━'.repeat(50))
-            qrcode.generate(qr, { small: true })
+            currentQR = qr
+            console.log(`\n📱 Buka URL ini di browser untuk scan QR:\n→ Cek tab "Settings" Railway → Domains → buka URL-nya\n`)
         }
 
         if (connection === 'open') {
+            isConnected = true
+            currentQR = null
             console.log('\n✅ Bot berhasil terhubung ke WhatsApp!\n')
         }
 
         if (connection === 'close') {
+            isConnected = false
             const code = lastDisconnect?.error?.output?.statusCode
             const loggedOut = code === DisconnectReason.loggedOut
             console.log(`⚠️  Koneksi terputus (code: ${code})`)
